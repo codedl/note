@@ -1,0 +1,1 @@
+首先在idea中安装插件Protobuf，禁用idea自身的proto插件。然后添加maven执行脚本`clean install -DskipTests -Drat.skip=true`并运行，找到启动类com.alibaba.nacos.Nacos并启动，如果发现缺少Java文件，则需要使用proto编译，先clean，再找到proto插件执行compile，再install即可，最后在命令行添加`-Dnacos.standalone=true`作为vm启动参数。启动时可以选择内置的derby数据库，也可以使用mysql数据库。
