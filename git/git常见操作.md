@@ -21,3 +21,12 @@ git fetch --all
 git reset --hard origin/master
 git pull //可以省略
 ```
+
++ 分支
+```
+git checkout -b new //新建并切换
+git branch new & git checkout new // 新建并切换
+git checkout master //切换
+git merge new //合并
+git branch -d new //删除
+```
