@@ -9,7 +9,7 @@ data3
 version-2
 ```
 再清除缓存
-```
+```git
 git rm -r --cached .
 git add .
 git commit -m 'update .gitignore'
@@ -23,7 +23,7 @@ git pull //可以省略
 ```
 
 + 分支
-```
+```git
 git checkout -b new //新建并切换
 git branch new & git checkout new // 新建并切换
 git checkout master //切换
