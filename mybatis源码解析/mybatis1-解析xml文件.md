@@ -1,4 +1,4 @@
-在`spring.factories`中定义了要自动加载的配置类`MybatisAutoConfiguration`，在这个类上使用@Configuration注解，spring在启动时会对这个类进行解析，创建组件。
+在`spring.factories`中定义了要自动加载的配置类`MybatisAutoConfiguration`，在这个类上使用了@Configuration注解，spring在启动时会对这个类进行解析，创建组件。
 ```java
 @org.springframework.context.annotation.Configuration
 @ConditionalOnClass({ SqlSessionFactory.class, SqlSessionFactoryBean.class })
@@ -16,11 +16,11 @@ public class MybatisAutoConfiguration {...}
     SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
     factory.setDataSource(dataSource);
     factory.setVfs(SpringBootVFS.class);
-    //配置文件路径
+    //获取mybatis.configLocation的值，即配置文件路径
     if (StringUtils.hasText(this.properties.getConfigLocation())) {
       factory.setConfigLocation(this.resourceLoader.getResource(this.properties.getConfigLocation()));
     }
-    //mybatis的配置对象Configuration
+    //从spring获取mybatis的配置对象Configuration
     Configuration configuration = this.properties.getConfiguration();
     if (configuration == null && !StringUtils.hasText(this.properties.getConfigLocation())) {
       configuration = new Configuration();
@@ -47,7 +47,7 @@ public class MybatisAutoConfiguration {...}
     if (StringUtils.hasLength(this.properties.getTypeHandlersPackage())) {
       factory.setTypeHandlersPackage(this.properties.getTypeHandlersPackage());
     }
-    //设置包含动态sql的xml文件路径
+    //到mybatis.mapper-location指定的路径加载映射sql的xml文件
     if (!ObjectUtils.isEmpty(this.properties.resolveMapperLocations())) {
       factory.setMapperLocations(this.properties.resolveMapperLocations());
     }
@@ -55,7 +55,53 @@ public class MybatisAutoConfiguration {...}
     return factory.getObject();
   }
 ```
-可以看到这个方法中先对SqlSessionFactoryBean类进行实例化，再调用getObject()创建SqlSessionFactory。首先在SqlSessionFactoryBean类的buildSqlSessionFactory()中配置Configuration对象，优先使用spring配置文件定义的配置，如果就看是否定义了mybatis的xml配置文件路径，再没有就默认一个。然后找到包含动态sql的xml映射文件，在XMLMapperBuilder.java#parse()中对xml文件进行解析。
+解析xml文件的时候先对XMLMapperBuilder进行实例化，再进行解析，从宏观看就是解析xml中"/mapper"标签下的所有的标签，然后跟声明的接口绑定，解析完以后就会`addLoadedResource`进行标记，防止重复解析。
+```java
+// SqlSessionFactoryBean.java#buildSqlSessionFactory
+        try {
+          XMLMapperBuilder xmlMapperBuilder = new XMLMapperBuilder(mapperLocation.getInputStream(),
+              configuration, mapperLocation.toString(), configuration.getSqlFragments());
+          xmlMapperBuilder.parse();
+        } catch (Exception e) {
+          throw new NestedIOException("Failed to parse mapping resource: '" + mapperLocation + "'", e);
+        } finally {
+          ErrorContext.instance().reset();
+        }
+        ......
+  public void parse() {
+    if (!configuration.isResourceLoaded(resource)) {
+      configurationElement(parser.evalNode("/mapper"));
+      configuration.addLoadedResource(resource);
+      bindMapperForNamespace();
+    }
+
+    parsePendingResultMaps();
+    parsePendingCacheRefs();
+    parsePendingStatements();
+  }
+```
+具体的解析工作是从XMLMapperBuilder.java#configurationElement()方法开始的，即依次解析xml中的每个标签。
+```java
+  private void configurationElement(XNode context) {
+    try {
+      String namespace = context.getStringAttribute("namespace");
+      if (namespace == null || namespace.equals("")) {
+        throw new BuilderException("Mapper's namespace cannot be empty");
+      }
+      builderAssistant.setCurrentNamespace(namespace);
+      cacheRefElement(context.evalNode("cache-ref"));
+      cacheElement(context.evalNode("cache"));
+      parameterMapElement(context.evalNodes("/mapper/parameterMap"));
+      resultMapElements(context.evalNodes("/mapper/resultMap"));
+      sqlElement(context.evalNodes("/mapper/sql"));
+      buildStatementFromContext(context.evalNodes("select|insert|update|delete"));
+    } catch (Exception e) {
+      throw new BuilderException("Error parsing Mapper XML. The XML location is '" + resource + "'. Cause: " + e, e);
+    }
+  }
+```
+
+可以看到这个方法中先对SqlSessionFactoryBean类进行实例化，再调用getObject()创建SqlSessionFactory。首先在SqlSessionFactoryBean类的buildSqlSessionFactory()中配置Configuration对象，优先使用spring配置文件定义的配置，如果没有就看是否定义了mybatis的xml配置文件路径，再没有就默认一个。然后找到包含动态sql的xml映射文件，在XMLMapperBuilder.java#parse()中对xml文件进行解析。
 ```java
   public void parse() {
    //加载xml映射文件，对mapper节点进行解析
@@ -71,6 +117,9 @@ public class MybatisAutoConfiguration {...}
     parsePendingStatements();
   }
 ```
+
+
+
 首先加载xml映射文件，对文件中每个标签进行解析，如果解析失败再重新尝试。接下来看下是怎么从xml中提取sql的。调用链是XMLMapperBuilder.java#configurationElement->buildStatementFromContext->XMLStatementBuilder.java#parseStatementNode->XMLLanguageDriver.java#createSqlSource。如果sql中含有"${"就是动态sql，用DynamicSqlSource表示，否则使用RawSqlSource，提取sql是在GenericTokenParser.java#parse()中完成的。
 ```java
   public String parse(String text) {
