@@ -13,3 +13,4 @@ idea根据打开文件定位到项目位置:点击Project一栏按钮Select Open
 idea优化springboot启动:VM options添加 -XX:+AlwaysPreTouch -Dspring.jmx.enabled=false -client
 idea配置springboot热部署:https://blog.csdn.net/weixin_44277280/article/details/125527585
 idea中文乱码:Editor>Console | Editor>File Encodings，Help>Edit Custom Vm Options添加-Dfile.encoding=UTF-8
+显示类中所有方法:Alt+7
