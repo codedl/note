@@ -80,7 +80,7 @@ public class MybatisAutoConfiguration {...}
     parsePendingStatements();
   }
 ```
-具体的解析工作是从XMLMapperBuilder.java#configurationElement()方法开始的，即依次解析xml中的每个标签。
+具体的解析工作是从XMLMapperBuilder.java#configurationElement()方法开始的，即依次解析xml中的每个标签，那我们就一个一个标签看吧。
 ```java
   private void configurationElement(XNode context) {
     try {
@@ -100,7 +100,44 @@ public class MybatisAutoConfiguration {...}
     }
   }
 ```
-
++ cache-ref：这个标签是引用其他xml的cache缓存的标签
++ cache：这个标签大有用处，负责配置mybatis的缓存，可以看到这个标签跟namespace，即接口的声明路径绑定的，上面的cache-ref正是通过namespace获取cache缓存的，可以看到这里使用了策略模式。
+```java
+  private void cacheElement(XNode context) throws Exception {
+    if (context != null) {
+      String type = context.getStringAttribute("type", "PERPETUAL");
+      Class<? extends Cache> typeClass = typeAliasRegistry.resolveAlias(type);
+      String eviction = context.getStringAttribute("eviction", "LRU");
+      Class<? extends Cache> evictionClass = typeAliasRegistry.resolveAlias(eviction);
+      Long flushInterval = context.getLongAttribute("flushInterval");
+      Integer size = context.getIntAttribute("size");
+      boolean readWrite = !context.getBooleanAttribute("readOnly", false);
+      boolean blocking = context.getBooleanAttribute("blocking", false);
+      Properties props = context.getChildrenAsProperties();
+      builderAssistant.useNewCache(typeClass, evictionClass, flushInterval, size, readWrite, blocking, props);
+    }
+  }
+  public Cache useNewCache(Class<? extends Cache> typeClass,
+      Class<? extends Cache> evictionClass,
+      Long flushInterval,
+      Integer size,
+      boolean readWrite,
+      boolean blocking,
+      Properties props) {
+    Cache cache = new CacheBuilder(currentNamespace)
+        .implementation(valueOrDefault(typeClass, PerpetualCache.class))
+        .addDecorator(valueOrDefault(evictionClass, LruCache.class))
+        .clearInterval(flushInterval)
+        .size(size)
+        .readWrite(readWrite)
+        .blocking(blocking)
+        .properties(props)
+        .build();
+    configuration.addCache(cache);
+    currentCache = cache;
+    return cache;
+  }
+```
 可以看到这个方法中先对SqlSessionFactoryBean类进行实例化，再调用getObject()创建SqlSessionFactory。首先在SqlSessionFactoryBean类的buildSqlSessionFactory()中配置Configuration对象，优先使用spring配置文件定义的配置，如果没有就看是否定义了mybatis的xml配置文件路径，再没有就默认一个。然后找到包含动态sql的xml映射文件，在XMLMapperBuilder.java#parse()中对xml文件进行解析。
 ```java
   public void parse() {
