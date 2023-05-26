@@ -100,4 +100,4 @@ public class WriteListenerImpl implements WriteListener {
 
 }
 ```
-此时就可以保持与客户端的会话连接而不阻塞的进行交互，将服务端数据非阻塞地返回给前端
+此时就可以保持与客户端的会话连接而不阻塞的进行交互，将服务端数据非阻塞地返回给客户端。
