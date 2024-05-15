@@ -15,11 +15,10 @@ git add .
 git commit -m 'update .gitignore'
 ```
 
-+ 强制拉取远程，覆盖本地
++ 拉取远程分支覆盖本地分支
 ```git
-git fetch --all
 git reset --hard origin/master
-git pull //可以省略
+git push -f
 ```
 
 + 分支
