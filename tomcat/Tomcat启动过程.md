@@ -369,4 +369,4 @@ tomcat重写了`ThreadPoolExecutor`，定制了一个Queue用于保存任务，�
         return result;
     }     
 ```
-再看下Engine容器的启动过程。在`Catalina`的`createStartDigester()`方法中会添加Engine的生成规则`digester.addRuleSet(new EngineRuleSet("Server/Service/"));`，
+再看下Engine容器的启动过程。在`Catalina`的`createStartDigester()`方法中会添加Engine的生成规则`digester.addRuleSet(new EngineRuleSet("Server/Service/"));`，在EngineRuleSet.java中会调用`addRuleInstances`添加Engine的生成规则`digester.addObjectCreate(prefix + "Engine", "org.apache.catalina.core.StandardEngine", "className");`，可以看到默认为org.apache.catalina.core.StandardEngine。在Service的`init`方法中会调用StandardEngine的init方法，
