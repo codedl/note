@@ -99,7 +99,7 @@ protected Digester createStartDigester() {
     }
 ```
 + 组件初始化  
-组件实例化之后就会以组合模式调用每个组件的`init()`方法，这里用到了Java中的组合模式，可以先看下组件之间的关系。![alt text](image.png)，调用`init()`时是从父组件Server开始依次调用。`init`方法本身逻辑就是状态变更，从`LifecycleState.INITIALIZING`到`LifecycleState.INITIALIZED`，然后调用模板方法`initInternal();`，因此我们直接看每个组件的模板方法就行。
+组件实例化之后就会以组合模式调用每个组件的`init()`方法，这里用到了Java中的组合模式，可以先看下组件之间的关系。![alt text](image.png) 调用`init()`时是从父组件Server开始依次调用。`init`方法本身逻辑就是状态变更，从`LifecycleState.INITIALIZING`到`LifecycleState.INITIALIZED`，然后调用模板方法`initInternal();`，因此我们直接看每个组件的模板方法就行。
 ```java
 // LifecycleBase.java
     public final synchronized void init() throws LifecycleException {
@@ -236,7 +236,7 @@ ProtocolHandler是协议处理器，从协议大类可以分成http和ajp，从i
     }
 ```
 1. 创建线程池  
-tomcat重写了`ThreadPoolExecutor`，定制了一个Queue用于保存任务，默认最大线程数是200。
+创建用于处理请求的线程池。tomcat重写了`ThreadPoolExecutor`，定制了一个Queue用于保存任务，默认最大线程数是200。
 ```java
     public void createExecutor() {
         internalExecutor = true;
