@@ -1,4 +1,17 @@
-tomcat启动时会调用Lifecycle的start()方法，`MapperListener.java`中的模板方法`startInternal()`会被调用，此时开始了请求url映射到容器的初始化之路。首先看下`private final Mapper mapper;`属性，这个属性包含了请求url到容器的所有映射关系。
+tomcat启动时会调用Lifecycle的start()方法，`MapperListener.java`中的方法`startInternal()`会被调用，此时开始了请求url映射到容器的初始化之路。首先看下`private final Mapper mapper;`属性，这个属性包含了请求url到容器的所有映射关系，其中hosts是Host容器的数组。  
+![alt text](image-2.png)
+```java
+public final class Mapper {
+    volatile MappedHost[] hosts = new MappedHost[0];
+
+    private volatile String defaultHostName = null;
+    private volatile MappedHost defaultHost = null;
+    private final Map<Context,ContextVersion> contextObjectToContextVersionMap = new ConcurrentHashMap<>();
+}
+```
+tomcat中请求url与各容器的映射关系保存在Mapper中的，关系图如下:
+![alt text](image-3.png)
+在tomcat启动阶段会调用`MapperListener.java`中的模板方法`startInternal()`
 ```java
     public void startInternal() throws LifecycleException {
 ......
