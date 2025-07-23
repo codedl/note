@@ -6,6 +6,9 @@
         elementData[size++] = e;
         return true;
     }
+    private void ensureCapacityInternal(int minCapacity) {
+        ensureExplicitCapacity(calculateCapacity(elementData, minCapacity));
+    }
     private static int calculateCapacity(Object[] elementData, int minCapacity) {
         if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
             return Math.max(DEFAULT_CAPACITY, minCapacity);
@@ -96,4 +99,7 @@
             lock.unlock();
         }
     }
+    final void setArray(Object[] a) {
+        array = a;
+    }    
 ```
