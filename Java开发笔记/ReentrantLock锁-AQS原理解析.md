@@ -15,7 +15,9 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         }).start();
     }
 ```
-现在开始撸源码了，这里的逻辑比较复杂，要花点时间耐心地去看。以非公平锁为例，首先以cas得方式将属性`private volatile int state;`得值从0设置为1，state=0说明当前锁没有被其他线程获取，能够设置成功则可以获取到锁，之后设置当前线程为锁得持有者即可，属性`private transient Thread exclusiveOwnerThread;`表示获取锁得线程实体。如果不能获取到锁，则`acquire(1)`将当前线程添加到队列挂起。
+现在开始撸源码了，这里的逻辑比较复杂，要花点时间耐心地去看。
++ 非公平锁  
+以非公平锁为例，首先以cas得方式将属性`private volatile int state;`得值从0设置为1，state=0说明当前锁没有被其他线程获取，能够设置成功则可以获取到锁，之后设置当前线程为锁得持有者即可，属性`private transient Thread exclusiveOwnerThread;`表示获取锁得线程实体。如果不能获取到锁，则`acquire(1)`将当前线程添加到队列挂起，可以看出这里是直接跟其他线程竞争锁的。
 ```java
         final void lock() {
             //直接获取锁
@@ -28,47 +30,33 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
 先判断是不是当前线程重复获取锁，然后加入队列挂起。
 ```java
     public final void acquire(int arg) {
-        if (!tryAcquire(arg) && acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+        if (!tryAcquire(arg) &&
+            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
             selfInterrupt();
     }
 ```
 这里有种情况就是当前线程重复得获取锁，这是在`protected final boolean tryAcquire(int acquires)`方法中实现得。先获取锁得状态，`if (c == 0)`说明锁没有被其他线程获取，此时判断队列前是否有其他线程，没有得话获取锁即可；如果`else if (current == getExclusiveOwnerThread()`，则说明获取锁得线程就是当前线程，则重复获取。
 ```java
-        protected final boolean tryAcquire(int acquires) {
+        final boolean nonfairTryAcquire(int acquires) {
             final Thread current = Thread.currentThread();
             int c = getState();
-            //这里会再次获取锁，因此在此期间可能持有锁的线程释放锁了；没有其他线程获取锁
             if (c == 0) {
-                if (!hasQueuedPredecessors() &&
-                    compareAndSetState(0, acquires)) {
+                //获取锁本质是cas将state属性置为1，记录当前获取锁的线程
+                if (compareAndSetState(0, acquires)) {
                     setExclusiveOwnerThread(current);
                     return true;
                 }
             }
-            //获取到锁的正是当前线程自身
+            //重复获取，如果当前线程重复调用lock则state+1
             else if (current == getExclusiveOwnerThread()) {
                 int nextc = c + acquires;
-                if (nextc < 0)
+                if (nextc < 0) // overflow
                     throw new Error("Maximum lock count exceeded");
                 setState(nextc);
                 return true;
             }
             return false;
         }
-```
-这里就是判断此线程之前是否还有其他线程在等待获取锁，如果有返回true。
-```java
-    public final boolean hasQueuedPredecessors() {
-        Node t = tail; // 尾节点
-        Node h = head; // 头节点
-        Node s;
-        // 初始化时h == t表示队列为空
-        // h != t说明队列中有其他线程
-        // h != t && (s = h.next) == null 说明队列不为空且正在有其他线程获取锁成功，当其他线程获取锁成功时h.next=null
-        // h != t && s.thread != Thread.currentThread() 队列中第二个节点不是本线程，s是队列中第二个节点
-        // 总之返回true说明要么有线程排在自己前面，要么有其他线程已经加锁成功
-        return h != t && ((s = h.next) == null || s.thread != Thread.currentThread());
-    }
 ```
 无法获取到锁时则将当前线程加入队列。
 ```java
@@ -79,6 +67,7 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         Node pred = tail;
         if (pred != null) {
             node.prev = pred;
+            //判断tail尾节点是否为pred值，是的话设置为node
             if (compareAndSetTail(pred, node)) {
                 pred.next = node;
                 return node;
@@ -93,7 +82,7 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         for (;;) {
             Node t = tail;
             //(t == null)说明队列为空
-            if (t == null) { // 初始化时队列中第一个节点为空节点，即获取到锁的节点为空节点
+            if (t == null) { // 初队列中第一个节点为空节点
                 if (compareAndSetHead(new Node()))
                     tail = head;
             } else {//把最新的节点加入队列尾
@@ -115,7 +104,7 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
             for (;;) {
                 //获取前一个节点
                 final Node p = node.predecessor();
-                //如果前一个节点是头节点，说明自身为第二个节点，则竞争锁
+                //如果前一个节点是头节点空节点，说明自身为第二个节点，则竞争锁
                 if (p == head && tryAcquire(arg)) {
                     //设置当前节点为队列中第一个节点
                     setHead(node);
@@ -140,11 +129,12 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
     private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
         //waitStatus在初始化和释放锁的时候都会置为0
         int ws = pred.waitStatus;
-        //当前一个节点为Node.SIGNAL时返回，之后为Node.SIGNAL的节点会唤醒当前线程
+        //前一个节点为Node.SIGNAL时返回，之后waitStatus为Node.SIGNAL的节点会唤醒当前线程
         if (ws == Node.SIGNAL)
             return true;
         if (ws > 0) {
             //一直往前移动，直到pred.waitStatus<=0，如果pred.waitStatus > 0则会从队列中移除
+            //pred.waitStatus > 0意味着线程发生异常不用被唤醒
             do {
                 node.prev = pred = pred.prev;
             } while (pred.waitStatus > 0);
@@ -159,6 +149,43 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
     private final boolean parkAndCheckInterrupt() {
         LockSupport.park(this);
         return Thread.interrupted();
+    }
+```
++ 公平锁   
+这里就是判断此线程之前是否还有其他线程在等待获取锁，如果有返回true。
+```java
+        protected final boolean tryAcquire(int acquires) {
+            final Thread current = Thread.currentThread();
+            int c = getState();
+            if (c == 0) {
+                if (!hasQueuedPredecessors() &&
+                    compareAndSetState(0, acquires)) {
+                    setExclusiveOwnerThread(current);
+                    return true;
+                }
+            }
+            else if (current == getExclusiveOwnerThread()) {
+                int nextc = c + acquires;
+                if (nextc < 0)
+                    throw new Error("Maximum lock count exceeded");
+                setState(nextc);
+                return true;
+            }
+            return false;
+        }
+    }
+    public final boolean hasQueuedPredecessors() {
+        Node t = tail; // 尾节点
+        Node h = head; // 头节点
+        Node s;
+        // 初始化时h == t表示队列为空
+        // h != t说明队列中有其他线程
+        //(s = h.next) == nul代码的点睛之笔,意思如果在acquireQueued()方法中获取到锁，执行到p.next = null，尽管链表非空，头、尾节点指向不同
+        //但是 h.next为null
+        // 总之返回true说明要么有线程排在自己前面，要么有其他线程已经加锁成功
+        // h != t && (s = h.next) == null -> 有线程正在获取锁并且已经获取
+        // h != t &&  h.next.thread != Thread.currentThread() -> 有线程排在自己前面先一步lock获取锁
+        return h != t && ((s = h.next) == null || s.thread != Thread.currentThread());
     }
 ```
 总结下lock()加锁的过程：
@@ -206,10 +233,14 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         int ws = node.waitStatus;
         if (ws < 0)
             compareAndSetWaitStatus(node, ws, 0);
-        //遍历链表，找到离自己最近且waitStatus <= 0的线程，然后唤醒
+        //遍历链表，唤醒调用lock等待锁的线程
         Node s = node.next;
+        //优先唤醒当前队列中释放的线程的next下一个线程
+        //s == null可能会出现，因为其他线程lock时可能还没来得及将next=null
         if (s == null || s.waitStatus > 0) {
             s = null;
+            //从队列尾向前遍历1.尾部为刚插入的节点不会轻易因为异常变为cancelled 
+            //2.next= null 出现的概率大
             for (Node t = tail; t != null && t != node; t = t.prev)
                 if (t.waitStatus <= 0)
                     s = t;
