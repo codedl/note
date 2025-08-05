@@ -82,7 +82,11 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         for (;;) {
             Node t = tail;
             //(t == null)说明队列为空
-            if (t == null) { // 初队列中第一个节点为空节点
+            //队列中第一个节点为空节点,调用lock方法失败说明必有一个线程成功lock到锁，此时队列中应该有两个节点
+            //队列中第一个节点为持有锁的节点，第二个节点为有资格争夺锁的节点
+            //初始化时添加一个空的node节点，在持有锁的线程调用release方法释放时才能唤醒lock失败的当前线程
+            //release中释放锁会判断(if (h != null && h.waitStatus != 0))
+            if (t == null) { 
                 if (compareAndSetHead(new Node()))
                     tail = head;
             } else {//把最新的节点加入队列尾
@@ -141,6 +145,7 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
             pred.next = node;
         } else {
             //前一个节点设置为Node.SIGNAL，用于唤醒本线程
+            //后面沿队列尾向头遍历时就能找到离头最近的node节点if (t.waitStatus <= 0)
             compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
         }
         return false;
@@ -236,10 +241,14 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         //遍历链表，唤醒调用lock等待锁的线程
         Node s = node.next;
         //优先唤醒当前队列中释放的线程的next下一个线程
-        //s == null可能会出现，因为其他线程lock时可能还没来得及将next=null
+        //s == null可能会出现，一个线程调用unlock释放锁的同时执行到此处，另外一个线程lock获取锁时执行到addWaiter中的pred.next = node;
+        //此时，链表存在，但是头节点的下个节点为null，只要遍历一次找出即可
         if (s == null || s.waitStatus > 0) {
             s = null;
-            //从队列尾向前遍历1.尾部为刚插入的节点不会轻易因为异常变为cancelled 
+            //从队列尾向前遍历找到离头节点最近的能够被唤醒状态不为cancelled的线程节点
+            //acquireQueued方法中for死循环不断尝试获取锁，
+            //被唤醒线程节点的前一个节点不是head后，会将node.prev = pred = pred.prev;状态为cancelled的线程清理掉，直到自己成为head的下个节点
+            //1.尾部为刚插入的节点不会轻易因为异常变为cancelled 
             //2.next= null 出现的概率大
             for (Node t = tail; t != null && t != node; t = t.prev)
                 if (t.waitStatus <= 0)
