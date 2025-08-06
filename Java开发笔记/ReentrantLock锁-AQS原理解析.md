@@ -1,4 +1,4 @@
-ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，干脆看下他的底层源码，了解他的原理。
+ReentrantLock是Java中常见的可重入锁，通过底层实现源码可以了解其原理。
 先看下简单的用法，就是能够先`lock()`获取锁，如果能成功拿到锁就可以继续往下执行，如果发现有其他线程已经拿到锁就阻塞，等待其他线程释放锁，然后再获取到锁以后往下执行，最后一定要`unlock()`释放锁。
 ```java
     AtomicInteger integer = new AtomicInteger();
@@ -58,7 +58,7 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
             return false;
         }
 ```
-无法获取到锁时则将当前线程加入队列。
+无法获取到锁时则将当前线程加入队列，例如原本队列为:[HEAD] <=> [T1] <=> [T2]，现在新的线程调用lock获取锁失败时为:[HEAD] <=> [T1] <=> [T2] <=> [T3]
 ```java
     private Node addWaiter(Node mode) {
         // 使用node封装当前线程
@@ -99,7 +99,7 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         }
     }
 ```
-队列中的第二个节点是可以去竞争锁的，如果竞争成功则移除第一个节点，否则将自身挂起。
+队列中的第二个节点是可以去竞争锁的，例如[HEAD] <=> [T1] <=> [T2] <=> [T3]，当线程位于HEAD节点之后，即队列中第二个节点时则可以竞争锁，如果竞争成功则移除第一个节点，将自身变化头节点，如[HEAD(T1)] <=> [T2] <=> [T3]， 否则将自身挂起。
 ```java
     final boolean acquireQueued(final Node node, int arg) {
         boolean failed = true;
@@ -128,7 +128,7 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         }
     }
 ```
-遍历整个队列，找到waitStatus(`volatile int waitStatus;`)为Node.SIGNAL的节点，然后将当前线程挂起。
+遍历整个链表，找到waitStatus(`volatile int waitStatus;`)为Node.SIGNAL的节点，然后将当前线程挂起。正常情况下每个线程节点的状态都是SIGNAL，如[HEAD] <=> [T1(SIGNAL)] <=> [T2(SIGNAL)] <=> [T3(SIGNAL)]，此时当前线程直接休眠；如果发现ws > 0即线程因为异常状态为CANCELLED时，如[HEAD] <=> [T1(SIGNAL)] <=> [T2(CANCELLED)] <=> [T3(SIGNAL)]，后面唤醒线程时从队列尾向队列前移动时就只能找到T3，但是T3不在HEAD后面导致线程没法被唤醒，所以需要移除CANCELLED的线程，变为：[HEAD] <=> [T1(SIGNAL)] <=> [T3(SIGNAL)]，在其他线程unlock释放锁，就能找到离HEAD最近的T1线程唤醒。
 ```java
     private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
         //waitStatus在初始化和释放锁的时候都会置为0
@@ -185,8 +185,8 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
         Node s;
         // 初始化时h == t表示队列为空
         // h != t说明队列中有其他线程
-        //(s = h.next) == nul代码的点睛之笔,意思如果在acquireQueued()方法中获取到锁，执行到p.next = null，尽管链表非空，头、尾节点指向不同
-        //但是 h.next为null
+        //(s = h.next) == nul代码的点睛之笔,意思如果在acquireQueued()方法中获取到锁，执行到p.next = null，
+        // 此时链表非空，头、尾节点指向不同，但是 h.next为null
         // 总之返回true说明要么有线程排在自己前面，要么有其他线程已经加锁成功
         // h != t && (s = h.next) == null -> 有线程正在获取锁并且已经获取
         // h != t &&  h.next.thread != Thread.currentThread() -> 有线程排在自己前面先一步lock获取锁
@@ -231,7 +231,13 @@ ReentrantLock是Java中常见的可重入锁，这几天被面试官问疯了，
             return free;
         }
 ```
-如果锁释放成功则唤醒队列中其他线程，找到waitStatus<0的线程，调用`LockSupport.unpark(s.thread)`唤醒。
+如果锁释放成功则唤醒队列中其他线程，找到waitStatus<0的线程，调用`LockSupport.unpark(s.thread)`唤醒。这里分三种情况：
+1. 正常情况  
+[HEAD] <=> [T1(SIGNAL)] <=> [T2(SIGNAL)] <=> [T3(SIGNAL)]，此时直接唤醒T1线程，T1发现自己位于HEAD之后就会获取锁
+2. 线程异常  
+[HEAD] <=> [T1(CANCELLED)] <=> [T2(SIGNAL)] <=> [T3(SIGNAL)]，此时从队列尾向前遍历，找到离HEAD最近的T2节点，T2被唤醒后在acquireQueued方法的for循环中发现自己不是队列中第二个节点，就会在shouldParkAfterFailedAcquire方法中从后往前移除掉CANCELLED线程，链表变为[HEAD]  <=> [T2(SIGNAL)] <=> [T3(SIGNAL)]，此时T2为HEAD后一个节点，就能获取到锁
+3. 极端情况
+s == null成立为极端情况了，一个线程调用unlock释放锁时队列为[HEAD(TAIL)]，此时另外一个线程调用lock获取锁执行到addWaiter中的pred.next = node语句，会将链表改为[HEAD] <- [T1(SIGNAL)]，即向后的next指向还未建立，代码继续往下执行，此时[HEAD] <=> [T1(SIGNAL)]，从队列尾向前遍历就能找到要唤醒的T1线程。
 ```java
     private void unparkSuccessor(Node node) {
         //将当前线程节点waitStatus置为0
