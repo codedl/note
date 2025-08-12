@@ -1,5 +1,13 @@
-先看put方法保存数据：
+先看put方法保存数据，内部调用`putVal()`方法保存到map，onlyIfAbsent参数的意思是传true时表示如果key对应的value存在就不会保存，evict暂不考虑，这是LinkedHashMap中实现的。找到节点的过程是：
+1. 数组不存在时创建数组
+2. 根据节点的哈希值计算出来的索引处没有节点时，新建一个`newNode`
+3. 判断链表的第一个是否为要更新的节点
+4. 否则遍历链表，如果遍历到链表尾部则新增`newNode`；如果发现链表深度大于阈值TREEIFY_THRESHOLD(默认8)时，链表转数，加速查询；如果在链表中发现要更新的节点则返回。  
+找到节点后更新数据即可。
 ```java
+    public V put(K key, V value) {
+        return putVal(hash(key), key, value, false, true);
+    }
     final V putVal(int hash, K key, V value, boolean onlyIfAbsent, boolean evict) {
         Node<K, V>[] tab;
         Node<K, V> p;
@@ -23,7 +31,8 @@
             else {
 //遍历链表
                 for (int binCount = 0; ; ++binCount) {
-//(e = p.next) == null表示遍历到链表中最后一个节点，如果没有发现哪个节点的key与要保存的key相同，在创建节点加入链表尾，作为链表中最后一个节点                 if ((e = p.next) == null) {
+//(e = p.next) == null表示遍历到链表中最后一个节点，如果没有发现哪个节点的key与要保存的key相同，链表尾添加的新的Node ，作为链表中最后一个节点                 
+                 if ((e = p.next) == null) {
                     p.next = newNode(hash, key, value, null);
 //当链表的深度大于TREEIFY_THRESHOLD(8)时，可以链表转树
                     if (binCount >= TREEIFY_THRESHOLD - 1) // -1 for 1st
@@ -32,6 +41,7 @@
                 }
 //如果找到一个节点的key与要保存的key相同，则在后面替换value
                 if (e.hash == hash && ((k = e.key) == key || (key != null && key.equals(k)))) break;
+                //移动到下个节点
                 p = e;
             }
         }
@@ -45,16 +55,16 @@
         }
         ++modCount;
         if (++size > threshold)
-
-
             resize();
-
 
         afterNodeInsertion(evict);
         return null;
     }
 ```
-再看下hashmap怎么扩容的，首先计算容量，默认为16，扩容时右移一位即扩大两倍，然后将原来数据拷贝到新数组，为了让数据更加均匀的分布，可以让原来的key的hash值与数组容量与运算，创建两条0和1的链条，分别保存在原理数组对应的索引处和新数组中"原索引+oldCap"处
+再看下hashmap怎么扩容的，首先计算容量，默认为16(0x1111)，这样与运算计算出来的索引就是由节点的hash值决定，引起哈希碰撞的概率就很小。扩容时右移一位即扩大两倍，仍然为2的整数次幂。然后将原来数据拷贝到新数组，为了让数据更加均匀的分布，可以让原来的key的hash值与数组容量与运算，创建两条0和1的链条，分别保存在原理数组对应的索引处和新数组中"原索引+oldCap"处。首先计算扩容后的数组容量为原始数组翻倍`newCap = oldCap << 1`，然后将原数组中数据移动到新数组，过程如下：
+1. 不存在链表，直接移动到新数组的`e.hash & (newCap - 1)`位置处
+2. 存在链表，如果` if ((e.hash & oldCap) == 0)`，则移动到跟原数组位置相同的地方，否则移动到"原索引+oldCap"处。  
+现在考虑下为什么`e.hash & oldCap`就能判断节点移动后在新数组中的位置，首先原始索引为:oldIndex = hash & (oldCap - 1)，新索引本来应该是newIndex = hash & (newCap - 1),但是不要忘了`newCap = oldCap << 1`，即计算新的索引时相对原索引只要考虑最高位的值，而最高位的值刚好为oldCap，进而能够减少位运算的位数提升效率。比如，oldCap=16时，oldIndex = hash & (oldCap - 1)为oldIndex = hash & 0x1111，而newCap=32,newIndex = hash & & 0x11111，跟原来的与运算相比结果由最高位0x10000决定的，如果hash的最高位是1就发生变化，结果为原始索引的二进制的oldCap中1的位置处置1，如果oldCap为0x10000，则将计算结果的第五位置1，这样只用考虑这一位的二进制结果即可。
 ```java
 final Node<K,V>[] resize() {
     Node<K,V>[] oldTab = table;
@@ -152,3 +162,4 @@ final Node<K,V>[] resize() {
     return newTab;
 }
 ```
+**总结下，HashMap保存数据会先计算索引，再生成链表，扩容时会将链表移动新数组中。有不对的地方请大神指出，欢迎大家一起讨论交流，共同进步，更多请关注微信公众号 葡萄开源**
