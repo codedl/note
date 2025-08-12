@@ -37,12 +37,15 @@ helloThread[Thread-1,5,main]
         return t.threadLocals;
     }    
 ```
-如果在一个线程中首次使用ThreadLocal保持数据，则需要创建ThreadLocalMap，ThreadLocalMap中保存数据的实体是Entry，保存数据的过程就是先计算这个ThreadLocal对象的hashcode，根据hashcode计算在Entry数组中的位置，然后将创建的Entry保存在这个位置。
+如果在一个线程中首次使用ThreadLocal保持数据，则需要创建ThreadLocalMap，ThreadLocalMap中保存数据的实体是Entry，保存数据的过程就是先计算这个ThreadLocal对象的hashcode，根据hashcode计算在Entry数组中的位置，然后将创建的Entry保存在这个位置。可以看到Entry中维护的是指向ThreadLocal的弱引用，之所以是弱引用，是因为代码块中ThreadLocal临时变量不再被访问时，在只有Entry的弱引用情况是会被gc的，如果是强引用则不会被gc，即使ThreadLocal不再被访问也不会被gc。
 ```java
     void createMap(Thread t, T firstValue) {
         t.threadLocals = new ThreadLocalMap(this, firstValue);
     }
         ThreadLocalMap(ThreadLocal<?> firstKey, Object firstValue) {
+            //INITIAL_CAPACITY=16
+            //初始容量为16，与运算计算索引时就是跟15(1111)取与，由hash值决定结果
+            //而ThreadLocal的哈希值由魔数0x61c88647维护，出现哈希碰撞的概率极低
             table = new Entry[INITIAL_CAPACITY];
             int i = firstKey.threadLocalHashCode & (INITIAL_CAPACITY - 1);
             table[i] = new Entry(firstKey, firstValue);
@@ -63,7 +66,7 @@ helloThread[Thread-1,5,main]
 调用set()设置值的时候，会根据ThreadLocal计算hashcode。ThreadLocal中的属性threadLocalHashCode`private final int threadLocalHashCode = nextHashCode();`用来维护每个ThreadLocal的hash值。再根据hashcode计算Entry数组的索引，根据索引找到当前线程对应的Entry，这里分三种情况：
 1. 第一次设值，则直接添加如果是当前线程使用的ThreadLocal`if (k == key)`，则将对象设置进来，即写到存储数据的Entry中  
 2. ThreadLocal`if (k == key)`已经有值了，就直接更新
-3. ThreadLocal作为临时变量被gc了`if (k == null)`，例如在方法代码块中声明的ThreadLocal临时变量在方法执行完时不存在了，Entry中的ThreadLocal作为key是弱引用就会被gc；或者线程销毁了，此时指向Entry的引用不存在了,Entry也会被gc，此时如果不gc的话就会出现一块无法访问到的Entry，造成内存泄漏。  
+3. `if (k == null)`会出现的情况是多个线程同时访问同一个ThreadLocal时，有个线程用完ThreadLocal然后置为null，第二个线程set时就会发现Entry中保存的ThreadLocal为null，而Entry却还存在但是无法被访问，进而出现内存泄漏，此时需要清理无效的过期Entry`replaceStaleEntry`。  
 ![alt text](../visio/threadlocal.png)
 
 set()时如果发现hash冲突，ThreadLocal的做法是向后移动一位，到数组的下个索引处保存Entry，如果下个索引处有值了再继续向后找。

@@ -1,4 +1,4 @@
-之前看过ThreadLocal保存值的代码，保存的时候会计算数据在数组中的索引`int i = key.threadLocalHashCode & (len-1);`，但是数组的长度有限的，如果有很多个ThreadLocal变量时，就有可能出现哈希冲突，即计算出来的索引相同。比如Entry数组的长度是8，而我们声明了9个ThreadLocal变量，这样同一个线程中同时操作这9个ThreadLocal时就会出现哈希碰撞，现在我们看下Java如何解决ThreadLocal的哈希冲突。
+之前看过ThreadLocal保存值的代码，保存的时候会计算数据在数组中的索引`int i = key.threadLocalHashCode & (len-1);`，跟数组的长度与运算是为了保证每个Entry都在数组中，避免越界。但是数组的长度有限的，如果有很多个ThreadLocal变量时，就有可能出现哈希冲突，即计算出来的索引相同。比如Entry数组的长度是8，而我们声明了9个ThreadLocal变量，这样同一个线程中同时操作这9个ThreadLocal时就会出现哈希碰撞，现在我们看下Java如何解决ThreadLocal的哈希冲突。
 ```java
         private void set(ThreadLocal<?> key, Object value) {
             Entry[] tab = table;
@@ -76,7 +76,7 @@
                 cleanSomeSlots(expungeStaleEntry(slotToExpunge), len);
         }
 ```
-再看下如何清理掉过期的Entry，沿staleSlot向后遍历，发现有内置的ThreadLocal对象为null时清理掉，同时找出存在哈希冲突的ThreadLocal，判断是否存在hash冲突`if (h != i)`的逻辑很简单，不存在时`k.threadLocalHashCode & (len - 1)`计算出来的值跟数组的索引i相等，发现不相等必然存在哈希冲突，将此处的Entry向前移动。例如ThreadLocal6=null、ThreadLocal7、ThreadLocal8的哈希值都是5，现在先将staleSlot=5处的插槽清理掉，再向后移动，发现ThreadLocal7存在哈希碰撞，保存在Entry6处(本来应该保存在5&8=5处)，就将ThreadLocal7移动到ThreadLocal6对应的Entry5处，同时令Entry6=null；下次迭代到ThreadLocal8,发现又存在哈希碰撞，此时移动保存ThreadLocal8的Entry，先打算移动到`int h = k.threadLocalHashCode & (len - 1);`处，即Entry5处，但是Entry5已经保存ThreadLocal6了`while (tab[h] != null) h = nextIndex(h, len);`，就从Entry5处向后移动，找到下一个空的Entry6处保存，最终实现去掉需要被gc的Entry，同时将存在哈希碰撞的Entry前移。此方法返回到一个为null的Entry索引。
+再看下如何清理掉过期的Entry，沿staleSlot向后遍历，发现有内置的ThreadLocal对象为null时清理掉，同时找出存在哈希冲突的ThreadLocal，判断是否存在hash冲突`if (h != i)`的逻辑很简单，不存在时`k.threadLocalHashCode & (len - 1)`计算出来的值跟数组的索引i相等，发现不相等必然存在哈希冲突，将此处的Entry向前移动。例如ThreadLocal6=null、ThreadLocal7、ThreadLocal8的哈希值都是5，现在先将staleSlot=5处的插槽清理掉，再向后移动，发现ThreadLocal7存在哈希碰撞，保存在Entry6处(本来应该保存在5(101)&15(1111)=5即Entry5处)，就将ThreadLocal7移动到ThreadLocal6对应的Entry5处，同时令Entry6=null；下次迭代到ThreadLocal8,发现又存在哈希碰撞，此时移动保存ThreadLocal8的Entry，先打算移动到`int h = k.threadLocalHashCode & (len - 1);`处，即Entry5处，但是Entry5已经保存ThreadLocal6了，于是向后移动一位`while (tab[h] != null) h = nextIndex(h, len);`，找到下一个空的Entry6处保存，再将Entry6=null，去掉需要被gc的Entry，同时将存在哈希碰撞的Entry前移。此方法返回到一个为null的Entry索引。
 ```java
         private int expungeStaleEntry(int staleSlot) {
             Entry[] tab = table;
